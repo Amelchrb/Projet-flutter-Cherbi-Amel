@@ -126,19 +126,16 @@ prompt="Expliquez la photosynthèse en termes simples."
 # #Installation du SDK OpenAI
 # #pip install openai
 
-# import openai
-
 # # Configure la clé API
-# # openai.api_key = "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"
-
 # import os
 # from openai import OpenAI
 
-# # Assurez-vous que votre clé API est stockée dans la variable d'environnement 'OPENAI_API_KEY'
-# api_key = "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"
+# # Configure la clé API depuis une variable d'environnement
+# api_key = os.getenv("OPENAI_API_KEY")
 
 # if not api_key:
-#     raise ValueError("La clé API OpenAI n'est pas définie dans les variables d'environnement.")
+#     raise ValueError("La clé API OpenAI n'est pas définie dans les variables d'environnement. "
+#                      "Ajoutez 'OPENAI_API_KEY' à vos variables d'environnement.")
 
 # # Initialisation du client OpenAI
 # client = OpenAI(api_key=api_key)
