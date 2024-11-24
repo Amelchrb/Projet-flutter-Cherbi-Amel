@@ -160,9 +160,7 @@ prompt="Expliquez la photosynthèse en termes simples."
 # if __name__ == "__main__":
 #     prompt = input("Entrez votre prompt : ")
 #     reponse = obtenir_reponse(prompt)
-#     print(f"Réponse du modèle : {reponse}")
-
-
+#     print(f"Réponse du modèle : {reponse}") 
 
 
 
