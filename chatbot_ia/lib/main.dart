@@ -6,29 +6,42 @@ void main() {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false, // Désactive le badge de débogage
-      title: 'Cherbi Chatbot', // Titre de l'application
+      title: 'Qwen Chatbot', // Titre de l'application
+
+      // Thème clair
       theme: ThemeData(
-        primaryColor: Colors.pink, // Couleur principale
-        colorScheme: ColorScheme.fromSwatch().copyWith(
-          secondary: Colors.green, // Couleur d'accentuation
+        colorScheme: ColorScheme.fromSwatch(
+          primarySwatch: Colors.pink, // Couleur principale
+          accentColor: Colors.green, // Couleur secondaire (deprecated)
+          brightness: Brightness.light, // Mode clair
         ),
-        brightness: Brightness.light, // Mode clair
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(color: Colors.black), // Texte par défaut en noir
+        ),
       ),
+
+      // Thème sombre
       darkTheme: ThemeData(
-        primaryColor: Colors.pink,
-        colorScheme: ColorScheme.fromSwatch().copyWith(
-          secondary: Colors.green,
+        colorScheme: ColorScheme.fromSwatch(
+          primarySwatch: Colors.pink,
+          accentColor: Colors.green,
+          brightness: Brightness.dark, // Mode sombre
         ),
-        brightness: Brightness.dark, // Mode sombrefvm
+        textTheme: const TextTheme(
+          bodyLarge:
+              TextStyle(color: Colors.white), // Texte par défaut en blanc
+        ),
       ),
+
+      // Mode du thème (automatique)
       themeMode: ThemeMode.system, // Change automatiquement selon le système
-      home: ChatScreen(), // Définit ChatScreen comme l'écran principal
+
+      // Page principale
+      home: ChatScreen(), // Définit ChatScreen comme écran principal
     );
   }
 }

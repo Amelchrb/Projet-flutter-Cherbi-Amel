@@ -6,8 +6,9 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  // Liste des messages (historique de la session)
-  final List<Map<String, String>> _messages = [];
+  final List<Map<String, String>> _messages =
+      []; // Messages de la conversation actuelle
+  final List<String> _conversationHistory = []; // Historique des conversations
   final TextEditingController _controller = TextEditingController();
   bool isLoggedIn = false; // État de connexion de l'utilisateur
 
@@ -16,16 +17,36 @@ class _ChatScreenState extends State<ChatScreen> {
     if (message.isEmpty) return;
 
     setState(() {
-      _messages.add({
-        'role': 'user',
-        'content': message
-      }); // Ajoute le message utilisateur
+      _messages.add(
+          {'role': 'user', 'content': message}); // Message de l'utilisateur
       _messages.add({
         'role': 'bot',
         'content': 'Réponse de l’IA...'
-      }); // Simulation de réponse IA
+      }); // Réponse simulée de l'IA
     });
     _controller.clear();
+  }
+
+  // Fonction pour débuter une nouvelle conversation
+  void _startNewConversation() {
+    if (_messages.isNotEmpty) {
+      // Sauvegarde le premier message de la conversation actuelle dans l'historique
+      String firstMessage = _messages.firstWhere(
+        (message) => message['role'] == 'user',
+        orElse: () => {'content': ''},
+      )['content']!;
+      if (firstMessage.isNotEmpty) {
+        // Ajoute un extrait des 3 premiers mots
+        String excerpt = firstMessage.split(' ').take(3).join(' ');
+        setState(() {
+          _conversationHistory.add(excerpt);
+        });
+      }
+    }
+    // Réinitialise la conversation actuelle
+    setState(() {
+      _messages.clear();
+    });
   }
 
   // Fonction pour changer l'état de connexion
@@ -38,30 +59,29 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Barre d'application en haut
+      backgroundColor: const Color(0xFFF5F5DC), // Beige clair
       appBar: AppBar(
-        title: Row(
-          children: [
-            Image.asset(
-              'assets/images/logo.png', // Le logo
-              height: 40,
-            ),
-            SizedBox(width: 10),
-            Text("Chat avec Cherbi"),
-          ],
+        title: const Text(
+          'Chat avec Cherbi',
+          style: TextStyle(fontFamily: 'Poppins', fontSize: 20),
         ),
         backgroundColor: Colors.pink,
         actions: [
           IconButton(
+            icon: const Icon(Icons.add,
+                color: Colors
+                    .white), // Icône pour démarrer une nouvelle conversation
+            onPressed: _startNewConversation,
+          ),
+          IconButton(
             icon: Icon(
-              Icons.power_settings_new, // Icône de démarrage
+              Icons.power_settings_new,
               color: isLoggedIn ? Colors.green : Colors.red,
             ),
             onPressed: _toggleLogin,
           ),
         ],
       ),
-      // Historique des conversations dans un Drawer
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
@@ -71,83 +91,110 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Image.asset(
-                    'assets/images/logo.png', // Le logo
-                    height: 60,
-                  ),
-                  SizedBox(height: 10),
-                  Text(
+                  const Icon(Icons.chat, size: 50, color: Colors.white),
+                  const SizedBox(height: 10),
+                  const Text(
                     'Historique des conversations',
                     style: TextStyle(color: Colors.white, fontSize: 16),
                   ),
                 ],
               ),
             ),
-            ..._messages
-                .map((message) => ListTile(
-                      title: Text(
-                        message['content'] ?? '',
-                        style: TextStyle(color: Colors.black),
-                      ),
-                      leading: Icon(
-                        message['role'] == 'user'
-                            ? Icons.person
-                            : Icons.smart_toy, // Icône utilisateur ou bot
-                        color: message['role'] == 'user'
-                            ? Colors.pink
-                            : Colors.green,
-                      ),
-                    ))
-                .toList(),
+            ..._conversationHistory.map((conversation) => ListTile(
+                  title: Text(
+                    conversation,
+                    style:
+                        const TextStyle(color: Colors.white), // Texte en blanc
+                  ),
+                  leading: const Icon(Icons.history, color: Colors.pink),
+                )),
           ],
         ),
       ),
-      // Corps principal de la page
       body: Column(
         children: [
           // Liste des messages
           Expanded(
             child: ListView.builder(
-              reverse: true, // Affiche les messages les plus récents en bas
               itemCount: _messages.length,
               itemBuilder: (context, index) {
                 final isUser = _messages[index]['role'] == 'user';
-                return Align(
-                  alignment:
-                      isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: EdgeInsets.symmetric(vertical: 5, horizontal: 10),
-                    padding: EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color:
-                          isUser ? Colors.pink.shade100 : Colors.green.shade100,
-                      borderRadius: BorderRadius.circular(10),
+
+                return Row(
+                  mainAxisAlignment:
+                      isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Logo pour les réponses de l'IA
+                    if (!isUser)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 10, right: 5),
+                        child: CircleAvatar(
+                          backgroundImage:
+                              AssetImage('assets/images/Icon-192.png'),
+                          radius: 20,
+                        ),
+                      ),
+                    Flexible(
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(
+                            vertical: 5, horizontal: 10),
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: isUser
+                              ? Colors.pink.shade300
+                              : Colors.green.shade200,
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(isUser ? 15 : 0),
+                            topRight: Radius.circular(isUser ? 0 : 15),
+                            bottomLeft: const Radius.circular(15),
+                            bottomRight: const Radius.circular(15),
+                          ),
+                        ),
+                        child: Text(
+                          _messages[index]['content'] ?? '',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontFamily: 'Comic Sans MS',
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
                     ),
-                    child: Text(
-                      _messages[index]['content'] ?? '',
-                      style: TextStyle(fontSize: 16),
-                    ),
-                  ),
+                  ],
                 );
               },
             ),
           ),
           // Champ de saisie
           Padding(
-            padding: EdgeInsets.all(10),
+            padding: const EdgeInsets.all(10),
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontFamily: 'Poppins',
+                      color: Colors.black,
+                    ),
                     decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Colors.grey.shade300,
                       hintText: "Écrivez votre message...",
-                      border: OutlineInputBorder(),
+                      hintStyle: const TextStyle(fontFamily: 'Poppins'),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
                     ),
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Icons.send, color: Colors.pink),
+                  icon: const Icon(Icons.send, color: Colors.pink),
                   onPressed: () => _sendMessage(_controller.text),
                 ),
               ],
