@@ -11,7 +11,11 @@
 # # Installation du package transformers 
 # # pip install transformers
 
-from transformers import pipeline
+#Utilisation de Flask pour l'API
+#pip install flask
+
+from flask import Flask, request, jsonify
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
 prompt="Expliquez la photosynthèse en termes simples."
@@ -209,81 +213,67 @@ prompt="Expliquez la photosynthèse en termes simples."
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import time  # Pour mesurer le temps de génération
+from flask_cors import CORS  # Importer flask-cors
 
-# Nom du modèle Qwen sélectionné (Qwen 2.5-0.5B Instruct)
+app = Flask(__name__)
+CORS(app)
+
+# Charger le modèle Qwen et le tokenizer
 model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-
-# Chargement du modèle pour fonctionner uniquement sur le CPU
-# On spécifie que le type de données est automatique, mais qu'on utilise seulement le CPU
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype=torch.float32,  # Assurez-vous que le modèle fonctionne bien en float32
-    device_map="cpu"  # Forcer l'utilisation du CPU
+    device_map="cpu"           # Forcer l'utilisation du CPU
 )
-
-# Chargement du tokenizer qui permet de transformer le texte en tokens utilisables par le modèle
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-# Interface utilisateur interactive
-print("Bienvenue dans l'assistant Qwen ! Tapez 'exit' pour quitter.")
-while True:
-    # Demande du prompt utilisateur
-    user_input = input("Tapez votre question : ")
-    
-    # Condition pour quitter la boucle
-    if user_input.lower() == "exit":
-        print("Merci d'avoir utilisé Qwen. À bientôt !")
-        break
-
-    # Configuration du contexte conversationnel pour donner une "personnalité" au modèle
-    messages = [
-        {"role": "system", "content": "Tu es Qwen, créé par Alibaba Cloud. Tu es un assistant intelligent."},
-        {"role": "user", "content": user_input}
-    ]
-
-    # Préparation du texte pour le modèle en format conversationnel
-    # Le texte est formaté pour être compris comme un échange entre un utilisateur et un assistant
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,  # Pas besoin de transformer en tokens immédiatement
-        add_generation_prompt=True  # Ajout d'un indicateur pour guider la génération
-    )
-
-    # Transformation du texte en tenseurs utilisables par le modèle
-    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
-    # Début de la mesure du temps de génération pour évaluer les performances
-    start_time = time.time()
-
-    # Génération de la réponse par le modèle
+@app.route('/chat', methods=['POST'])
+def chat():
     try:
-        # On limite le nombre maximum de tokens générés pour éviter un dépassement de mémoire
+        # Récupérer le message utilisateur
+        data = request.get_json(force=True)
+        user_input = data.get('message', '').strip()
+        if not user_input:
+            return jsonify({"error": "Le champ 'message' est vide."}), 400
+
+        # Préparer le prompt pour le modèle
+        messages = [
+            {"role": "system", "content": "Tu es Qwen, créé par Alibaba Cloud. Tu es un assistant intelligent."},
+            {"role": "user", "content": user_input}
+        ]
+        text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,  # Pas besoin de transformer en tokens immédiatement
+            add_generation_prompt=True  # Ajout d'un indicateur pour guider la génération
+        )
+        model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+
+        # Mesurer le temps de génération
+        start_time = time.time()
+
+        # Génération de la réponse
         generated_ids = model.generate(
             **model_inputs,
-            max_new_tokens=512,  # Limitation à 512 tokens pour la réponse
-            temperature=0.6,  # Ajustement pour rendre les réponses plus variées
-            top_p=0.95  # Nucleus sampling pour améliorer la cohérence
+            max_new_tokens=512,  # Limitation pour éviter les phrases trop longues
+            temperature=0.6,     # Ajustement pour la cohérence
+            top_p=0.95           # Réduction des incohérences
         )
+
+        # Mesure de fin de génération
+        end_time = time.time()
+        print(f"Temps de génération : {end_time - start_time:.2f} secondes")
+
+        # Décodage de la réponse générée
+        generated_ids = [
+            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+        ]
+        response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+
+        # Retourner la réponse directement
+        return jsonify({"response": response.strip()}), 200
+
     except Exception as e:
-        print(f"Erreur lors de la génération : {e}")
-        print("Désolé, une erreur s'est produite. Réessayez avec une autre question.")
-        continue  # Passe au prochain prompt sans arrêter le programme
+        return jsonify({"error": str(e)}), 500
 
-    # Fin de la mesure du temps de génération
-    end_time = time.time()
-    print(f"Temps de génération : {end_time - start_time:.2f} secondes")
-
-    # Extraction uniquement des tokens générés (sans répéter l'entrée utilisateur)
-    generated_ids = [
-        output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-    ]
-
-    # Décodage des tokens générés pour obtenir une réponse lisible
-    response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-
-    # Affichage de la réponse générée par Qwen
-    print("Réponse de Qwen :")
-    print(response)
-    print("-" * 50)  # Ligne de séparation pour une meilleure lisibilité
-
-
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
