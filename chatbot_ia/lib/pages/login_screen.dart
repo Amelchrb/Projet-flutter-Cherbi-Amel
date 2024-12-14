@@ -12,6 +12,29 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
 
+  // Fonction pour envoyer un email de réinitialisation de mot de passe
+  void _resetPassword() async {
+    final email = _emailController.text.trim();
+
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Veuillez entrer un e-mail valide.")),
+      );
+      return;
+    }
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Email de réinitialisation envoyé.")),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Erreur : ${e.toString()}")),
+      );
+    }
+  }
+
   // Fonction pour se connecter avec e-mail et mot de passe
   void _login() async {
     setState(() {
@@ -65,7 +88,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // Gestion des erreurs Firebase Auth
   void _handleAuthError(Object e) {
     String errorMessage;
 
@@ -149,7 +171,16 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 10),
+            // Bouton pour réinitialiser le mot de passe
+            TextButton(
+              onPressed: _resetPassword,
+              child: const Text(
+                "Mot de passe oublié ?",
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+            const SizedBox(height: 20),
             // Bouton de connexion
             ElevatedButton(
               onPressed: _isLoading ? null : _login,
@@ -185,10 +216,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: TextStyle(fontSize: 16, color: Colors.white),
               ),
             ),
-            const SizedBox(height: 20),
-            // Lien vers la page d'inscription
-            GestureDetector(
-              onTap: () {
+            const Spacer(),
+            // Bouton d'inscription en bas de la page
+            TextButton(
+              onPressed: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => RegisterScreen()),
@@ -198,6 +229,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 "Pas encore inscrit ? Créez un compte",
                 style: TextStyle(
                   color: Colors.pink,
+                  fontWeight: FontWeight.bold,
                   decoration: TextDecoration.underline,
                 ),
               ),

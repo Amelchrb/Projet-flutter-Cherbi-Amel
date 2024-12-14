@@ -73,29 +73,8 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // Fonction pour appeler l'API Flask
-  Future<String> _sendMessageToAPI(String message) async {
-    final url = Uri.parse('http://10.21.35.155:5000/chat');
-    try {
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'message': message}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['response'] ?? 'Erreur : réponse vide.';
-      } else {
-        return 'Erreur API : ${response.statusCode}';
-      }
-    } catch (e) {
-      return 'Erreur de connexion à l’API : $e';
-    }
-  }
-
   // Fonction pour envoyer un message
-  void _sendMessage(String message) async {
+  Future<void> _sendMessage(String message) async {
     if (message.isEmpty) return;
 
     // Créer une nouvelle conversation dans l'historique si aucune conversation active
@@ -147,37 +126,94 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // Sauvegarder les messages dans Firestore
+// Méthode pour sauvegarder un message dans Firestore
   Future<void> _saveMessage(String role, String content) async {
-    if (currentConversationId == null) return;
+    if (currentConversationId == null)
+      return; // Vérifie qu'une conversation est active
 
-    await FirebaseFirestore.instance.collection('messages').add({
-      'conversationId': currentConversationId,
-      'userId': currentUser?.uid,
-      'role': role,
-      'content': content,
-      'timestamp': DateTime.now(),
-    });
+    try {
+      // Ajouter le message à la collection "messages"
+      await FirebaseFirestore.instance.collection('messages').add({
+        'conversationId': currentConversationId, // ID de la conversation active
+        'userId': currentUser?.uid, // ID de l'utilisateur connecté
+        'role': role, // Rôle ("user" ou "bot")
+        'content': content, // Contenu du message
+        'timestamp': DateTime.now(), // Date et heure du message
+      });
+    } catch (e) {
+      // En cas d'erreur, affiche un message dans la console
+      print('Erreur lors de la sauvegarde du message : $e');
+    }
   }
 
-  // Réinitialiser les messages sans créer de nouvelle ligne dans l'historique
-  void _startNewConversation() {
+  // Appeler l'API Flask pour obtenir une réponse
+  Future<String> _sendMessageToAPI(String message) async {
+    final url = Uri.parse('http://10.21.35.155:5000/chat');
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'message': message}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['response'] ?? 'Erreur : réponse vide.';
+      } else {
+        return 'Erreur API : ${response.statusCode}';
+      }
+    } catch (e) {
+      return 'Erreur de connexion à l’API : $e';
+    }
+  }
+
+  // Supprimer une conversation
+  Future<void> _deleteConversation(String conversationId) async {
     setState(() {
-      _messages.clear();
-      currentConversationId = null;
+      _isLoading = true;
     });
-  }
 
-  // Gestion de la déconnexion
-  void _logout() async {
-    await FirebaseAuth.instance.signOut();
-    _redirectToLogin();
+    try {
+      // Supprimer tous les messages liés à cette conversation
+      final messagesRef = FirebaseFirestore.instance.collection('messages');
+      final messagesSnapshot = await messagesRef
+          .where('conversationId', isEqualTo: conversationId)
+          .get();
+
+      for (var doc in messagesSnapshot.docs) {
+        await doc.reference.delete();
+      }
+
+      // Supprimer la conversation elle-même
+      await FirebaseFirestore.instance
+          .collection('history')
+          .doc(conversationId)
+          .delete();
+
+      // Réinitialiser l'état si la conversation active est supprimée
+      if (currentConversationId == conversationId) {
+        setState(() {
+          currentConversationId = null;
+          _messages.clear();
+        });
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Conversation supprimée avec succès.')),
+      );
+    } catch (e) {
+      print('Erreur lors de la suppression : $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5DC), // Beige clair
+      backgroundColor: const Color(0xFFF5F5DC),
       appBar: AppBar(
         title: const Text(
           'Chat avec Qwen',
@@ -187,11 +223,19 @@ class _ChatScreenState extends State<ChatScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.add, color: Colors.white),
-            onPressed: _startNewConversation,
+            onPressed: () {
+              setState(() {
+                _messages.clear();
+                currentConversationId = null;
+              });
+            },
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: _logout,
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              _redirectToLogin();
+            },
           ),
         ],
       ),
@@ -212,7 +256,7 @@ class _ChatScreenState extends State<ChatScreen> {
               padding: EdgeInsets.zero,
               children: [
                 DrawerHeader(
-                  decoration: BoxDecoration(color: Colors.pink),
+                  decoration: const BoxDecoration(color: Colors.pink),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: const [
@@ -229,16 +273,18 @@ class _ChatScreenState extends State<ChatScreen> {
                   final isActive = doc.id == currentConversationId;
 
                   return ListTile(
-                    tileColor: isActive
-                        ? Colors.pink.shade100 // Couleur pour la ligne active
-                        : null,
+                    tileColor: isActive ? Colors.pink.shade100 : null,
                     title: Text(
                       doc['excerpt'],
                       style: TextStyle(
-                        color: isActive ? Colors.pink : Colors.black,
+                        color: isActive ? Colors.pink : Colors.white,
                       ),
                     ),
                     leading: const Icon(Icons.history, color: Colors.pink),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () => _deleteConversation(doc.id),
+                    ),
                     onTap: () => _loadConversation(doc.id),
                   );
                 }).toList(),
@@ -258,16 +304,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 return Row(
                   mainAxisAlignment:
                       isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (!isUser)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 10, right: 5),
-                        child: CircleAvatar(
-                          backgroundImage:
-                              AssetImage('assets/images/Icon-192.png'),
-                          radius: 20,
-                        ),
+                      const CircleAvatar(
+                        backgroundImage:
+                            AssetImage('assets/images/Icon-192.png'),
+                        radius: 20,
                       ),
                     Flexible(
                       child: Container(
@@ -278,18 +320,13 @@ class _ChatScreenState extends State<ChatScreen> {
                           color: isUser
                               ? Colors.pink.shade300
                               : Colors.green.shade200,
-                          borderRadius: BorderRadius.only(
-                            topLeft: Radius.circular(isUser ? 15 : 0),
-                            topRight: Radius.circular(isUser ? 0 : 15),
-                            bottomLeft: const Radius.circular(15),
-                            bottomRight: const Radius.circular(15),
-                          ),
+                          borderRadius: BorderRadius.circular(15),
                         ),
                         child: Text(
                           _messages[index]['content'] ?? '',
                           style: const TextStyle(
                             fontSize: 16,
-                            fontFamily: 'Comic Sans MS',
+                            fontFamily: 'Poppins',
                             color: Colors.white,
                           ),
                         ),
@@ -308,21 +345,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontFamily: 'Poppins',
-                      color: Colors.white,
-                    ),
                     decoration: InputDecoration(
                       filled: true,
                       fillColor: Colors.grey.shade400,
                       hintText: "Écrivez votre message...",
-                      hintStyle: const TextStyle(fontFamily: 'Poppins'),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(
-                          color: Colors.grey.shade600,
-                        ),
                       ),
                     ),
                   ),

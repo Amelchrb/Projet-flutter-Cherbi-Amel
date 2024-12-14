@@ -1,6 +1,6 @@
 # #Configuration d'un environnemet virtuel.
 # # python -m venv env
-# # env\Scripts\activate
+# # ..\env\Scripts\activate   
 
 # #Installation pip et setuptools
 # # python -m pip install --upgrade pip setuptools
