@@ -12,30 +12,28 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final List<Map<String, String>> _messages = []; // Liste des messages affichés
-  final List<Map<String, dynamic>> _batchedMessages =
-      []; // Liste tampon pour le Batch Writing
+  final List<Map<String, String>> _messages = [];
+  final List<Map<String, dynamic>> _batchedMessages = [];
   final TextEditingController _controller = TextEditingController();
   User? currentUser;
-  String? currentConversationId; // Conversation active
-  bool _isLoading = false; // Pour afficher un état de chargement
-  late http.Client httpClient; // Client HTTP pour Keep-Alive
+  String? currentConversationId;
+  bool _isLoading = false;
+  late http.Client httpClient;
 
   @override
   void initState() {
     super.initState();
-    httpClient = http.Client(); // Initialisation du client HTTP
+    httpClient = http.Client();
     _checkUser();
   }
 
   @override
   void dispose() {
-    _saveMessagesBatch(); // Sauvegarde les messages en lot avant de quitter
-    httpClient.close(); // Fermeture du client HTTP
+    _saveMessagesBatch();
+    httpClient.close();
     super.dispose();
   }
 
-  // Vérifier si un utilisateur est connecté
   void _checkUser() {
     currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
@@ -43,7 +41,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // Rediriger vers la page de connexion
   void _redirectToLogin() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Navigator.pushReplacement(
@@ -54,23 +51,19 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _startNewConversation() async {
-    // Sauvegarder les messages restants dans le batch
-    await _saveMessagesBatch(); // Sauvegarde les messages en lot
-
-    // Réinitialiser l'état
+    await _saveMessagesBatch();
     setState(() {
-      _messages.clear(); // Vide les messages affichés
-      currentConversationId = null; // Réinitialise l'ID de la conversation
+      _messages.clear();
+      currentConversationId = null;
     });
   }
 
-  // Charger les messages d'une conversation avec pagination
   Future<void> _loadConversation(String conversationId) async {
-    _saveMessagesBatch(); // Sauvegarde les messages restants avant de charger une nouvelle conversation
+    _saveMessagesBatch(); // Sauvegarde les messages en cours avant de charger une nouvelle conversation
 
     setState(() {
-      _isLoading = true;
-      _messages.clear();
+      _isLoading = true; // Active l'indicateur de chargement
+      _messages.clear(); // Efface les messages affichés précédemment
     });
 
     try {
@@ -78,54 +71,59 @@ class _ChatScreenState extends State<ChatScreen> {
           .collection('messages')
           .where('conversationId', isEqualTo: conversationId)
           .where('userId', isEqualTo: currentUser?.uid)
-          .orderBy('timestamp')
-          .limit(50)
+          .orderBy('timestamp') // Trie les messages par ordre chronologique
           .get();
 
-      setState(() {
-        for (var doc in querySnapshot.docs) {
-          _messages.add({
-            'role': doc['role'],
-            'content': doc['content'],
-          });
-        }
-        currentConversationId = conversationId;
-        _isLoading = false;
-      });
+      if (querySnapshot.docs.isNotEmpty) {
+        setState(() {
+          _messages.addAll(querySnapshot.docs.map((doc) {
+            final data = doc.data(); // Récupération des données du document
+            return {
+              'role': data['role'].toString(),
+              'content': data['content'].toString(),
+              'time': data.containsKey('generation_time')
+                  ? data['generation_time'].toString()
+                  : 'Temps inconnu', // Vérification du champ
+            };
+          }).toList());
+          currentConversationId = conversationId; // Met à jour l'ID actif
+        });
+      } else {
+        print("Aucun message trouvé pour cette conversation.");
+      }
     } catch (e) {
-      print('Erreur lors du chargement de la conversation : $e');
+      print('Erreur lors du chargement des messages : $e');
+    } finally {
       setState(() {
-        _isLoading = false;
+        _isLoading = false; // Désactive l'indicateur de chargement
       });
     }
   }
 
-  // Ajouter un message à la liste tampon pour écriture en lot
-  void _queueMessage(String role, String content) {
+  void _queueMessage(String role, String content, {String? generationTime}) {
     if (currentConversationId == null) return;
+
+    // Obtenir l'heure actuelle avec précision
+    final now = DateTime.now();
 
     _batchedMessages.add({
       'conversationId': currentConversationId,
       'userId': currentUser?.uid,
       'role': role,
       'content': content,
-      'timestamp': DateTime.now(),
+      'timestamp':
+          now.millisecondsSinceEpoch, // Utilisation du timestamp précis
+      if (generationTime != null) 'generation_time': generationTime,
     });
 
-    // Log : Afficher la taille du batch après ajout
-    print(
-        'Message ajouté au batch. Taille actuelle du batch : ${_batchedMessages.length}');
-
     // Sauvegarde automatique si le batch atteint 5 messages
-    if (_batchedMessages.length >= 6) {
+    if (_batchedMessages.length >= 5) {
       _saveMessagesBatch();
     }
   }
 
-  // Sauvegarder les messages en lot dans Firestore
   Future<void> _saveMessagesBatch() async {
-    if (_batchedMessages.isEmpty)
-      return; // Si aucun message à sauvegarder, ne rien faire
+    if (_batchedMessages.isEmpty) return;
 
     final batch = FirebaseFirestore.instance.batch();
 
@@ -135,24 +133,24 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
-      await batch
-          .commit(); // Sauvegarder tous les messages en une seule opération
-      _batchedMessages.clear(); // Vider la liste tampon après la sauvegarde
+      await batch.commit();
+      _batchedMessages.clear();
     } catch (e) {
-      print('Erreur lors de l\'écriture en lot : $e');
+      print('Erreur lors de la sauvegarde : $e');
     }
   }
 
-  // Appeler l'API Flask pour obtenir une réponse
-  Future<String> _sendMessageToAPI(String message) async {
-    final url = Uri.parse('http://10.21.35.155:5000/chat');
-    try {
-      // Vérifier le cache avant d'envoyer la requête
-      final cachedResponse = await _getCachedResponse(message);
-      if (cachedResponse != null) {
-        return cachedResponse; // Retourner la réponse en cache
-      }
+  Future<Map<String, String>> _sendMessageToAPI(String message) async {
+    // Vérifie si une réponse existe dans le cache
+    final cachedResponse = await _getCachedResponse(message);
+    if (cachedResponse != null) {
+      print('Réponse chargée depuis le cache');
+      return cachedResponse;
+    }
 
+    // Appel API si aucune réponse n'est trouvée dans le cache
+    final url = Uri.parse('http://127.0.0.1:5000/chat');
+    try {
       final response = await httpClient.post(
         url,
         headers: {'Content-Type': 'application/json'},
@@ -161,79 +159,22 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final botResponse = data['response'] ?? 'Erreur : réponse vide.';
-        await _cacheResponse(
-            message, botResponse); // Mise en cache de la réponse
-        return botResponse;
+        final botResponse = data['response'] ?? 'Erreur : réponse vide';
+        final generationTime = data['generation_time'] ?? 'Temps inconnu';
+
+        // Sauvegarde la réponse dans le cache
+        await _cacheResponse(message, botResponse, generationTime);
+
+        return {'response': botResponse, 'time': generationTime};
       } else {
-        return 'Erreur API : ${response.statusCode}';
+        return {
+          'response': 'Erreur API : ${response.statusCode}',
+          'time': 'Temps inconnu'
+        };
       }
     } catch (e) {
-      return 'Erreur de connexion à l’API : $e';
+      return {'response': 'Erreur de connexion : $e', 'time': 'Temps inconnu'};
     }
-  }
-
-  // Sauvegarder un message en cache
-  Future<void> _cacheResponse(String message, String response) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(message, response);
-  }
-
-  // Récupérer une réponse du cache
-  Future<String?> _getCachedResponse(String message) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(message);
-  }
-
-  // Fonction pour envoyer un message
-  Future<void> _sendMessage(String message) async {
-    if (message.isEmpty) return;
-
-    // Créer une nouvelle conversation si aucune n'est active
-    if (currentConversationId == null) {
-      final excerpt = message.split(' ').take(3).join(' ');
-      final newConversationRef =
-          FirebaseFirestore.instance.collection('history').doc();
-
-      try {
-        await newConversationRef.set({
-          'userId': currentUser?.uid,
-          'excerpt': excerpt,
-          'timestamp': DateTime.now(),
-        });
-
-        setState(() {
-          currentConversationId = newConversationRef.id;
-        });
-      } catch (e) {
-        print('Erreur lors de la création de la conversation : $e');
-        return;
-      }
-    }
-
-    // Efface immédiatement le champ de saisie
-    _controller.clear();
-
-    // Ajouter le message utilisateur dans l'interface
-    setState(() {
-      _messages.add({'role': 'user', 'content': message});
-      _isLoading = true; // Activer l'état de chargement
-    });
-
-    // Ajouter le message utilisateur dans la liste tampon
-    _queueMessage('user', message);
-
-    // Appeler l'API Flask pour obtenir une réponse
-    final botResponse = await _sendMessageToAPI(message);
-
-    // Ajouter la réponse du bot dans l'interface
-    setState(() {
-      _messages.add({'role': 'bot', 'content': botResponse});
-      _isLoading = false; // Désactiver l'état de chargement
-    });
-
-    // Ajouter la réponse du bot dans la liste tampon
-    _queueMessage('bot', botResponse);
   }
 
   // Supprimer une conversation
@@ -279,6 +220,71 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _cacheResponse(
+      String message, String response, String generationTime) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        message,
+        jsonEncode({
+          'response': response,
+          'time': generationTime,
+        }));
+  }
+
+  Future<Map<String, String>?> _getCachedResponse(String message) async {
+    final prefs = await SharedPreferences.getInstance();
+    final cachedData = prefs.getString(message);
+
+    if (cachedData != null) {
+      final decodedData = jsonDecode(cachedData);
+      return {
+        'response': decodedData['response'],
+        'time': decodedData['time'],
+      };
+    }
+    return null;
+  }
+
+  Future<void> _sendMessage(String message) async {
+    if (message.isEmpty) return;
+
+    if (currentConversationId == null) {
+      final newConversationRef =
+          FirebaseFirestore.instance.collection('history').doc();
+      await newConversationRef.set({
+        'userId': currentUser?.uid,
+        'excerpt': message.split(' ').take(3).join(' '),
+        'timestamp': DateTime.now(),
+      });
+      setState(() {
+        currentConversationId = newConversationRef.id;
+      });
+    }
+
+    _controller.clear();
+    setState(() {
+      _messages.add({'role': 'user', 'content': message});
+      _isLoading = true;
+    });
+
+    try {
+      final apiResult = await _sendMessageToAPI(message);
+      _messages.add({
+        'role': 'bot',
+        'content': apiResult['response']!,
+        'time': apiResult['time']!,
+      });
+
+      _queueMessage('user', message);
+      _queueMessage('bot', apiResult['response']!,
+          generationTime: apiResult['time']);
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -293,7 +299,7 @@ class _ChatScreenState extends State<ChatScreen> {
           IconButton(
             icon: const Icon(Icons.add, color: Colors.white),
             onPressed: () {
-              _startNewConversation(); // Appel de la méthode
+              _startNewConversation();
             },
           ),
           IconButton(
@@ -309,8 +315,7 @@ class _ChatScreenState extends State<ChatScreen> {
         child: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('history')
-              .where('userId',
-                  isEqualTo: currentUser?.uid) // Vérifie l'utilisateur actuel
+              .where('userId', isEqualTo: currentUser?.uid)
               .snapshots(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
@@ -367,37 +372,59 @@ class _ChatScreenState extends State<ChatScreen> {
               itemCount: _messages.length,
               itemBuilder: (context, index) {
                 final isUser = _messages[index]['role'] == 'user';
+                final messageTime = _messages[index]['time'] ?? 'Temps inconnu';
 
-                return Row(
-                  mainAxisAlignment:
-                      isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+                return Column(
+                  crossAxisAlignment: isUser
+                      ? CrossAxisAlignment.end
+                      : CrossAxisAlignment.start,
                   children: [
+                    // Affiche le temps uniquement pour les messages du chatbot
                     if (!isUser)
-                      const CircleAvatar(
-                        backgroundImage:
-                            AssetImage('assets/images/Icon-192.png'),
-                        radius: 20,
-                      ),
-                    Flexible(
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(
-                            vertical: 5, horizontal: 10),
-                        padding: const EdgeInsets.all(15),
-                        decoration: BoxDecoration(
-                          color: isUser
-                              ? Colors.pink.shade300
-                              : Colors.green.shade200,
-                          borderRadius: BorderRadius.circular(15),
-                        ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10.0),
                         child: Text(
-                          _messages[index]['content'] ?? '',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontFamily: 'Poppins',
-                            color: Colors.white,
+                          messageTime, // Temps du message
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
                           ),
                         ),
                       ),
+                    // Bulle de message
+                    Row(
+                      mainAxisAlignment: isUser
+                          ? MainAxisAlignment.end
+                          : MainAxisAlignment.start,
+                      children: [
+                        if (!isUser)
+                          const CircleAvatar(
+                            backgroundImage:
+                                AssetImage('assets/images/Icon-192.png'),
+                            radius: 20,
+                          ),
+                        Flexible(
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(
+                                vertical: 5, horizontal: 10),
+                            padding: const EdgeInsets.all(15),
+                            decoration: BoxDecoration(
+                              color: isUser
+                                  ? Colors.pink.shade300
+                                  : Colors.green.shade200,
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            child: Text(
+                              _messages[index]['content'] ?? 'Message vide',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontFamily: 'Poppins',
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 );

@@ -243,8 +243,8 @@ def chat():
         ]
         text = tokenizer.apply_chat_template(
             messages,
-            tokenize=False,  # Pas besoin de transformer en tokens immédiatement
-            add_generation_prompt=True  # Ajout d'un indicateur pour guider la génération
+            tokenize=False,
+            add_generation_prompt=True
         )
         model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
@@ -254,14 +254,14 @@ def chat():
         # Génération de la réponse
         generated_ids = model.generate(
             **model_inputs,
-            max_new_tokens=512,  # Limitation pour éviter les phrases trop longues
-            temperature=0.6,     # Ajustement pour la cohérence
-            top_p=0.95           # Réduction des incohérences
+            max_new_tokens=512,
+            temperature=0.6,
+            top_p=0.95
         )
 
         # Mesure de fin de génération
         end_time = time.time()
-        print(f"Temps de génération : {end_time - start_time:.2f} secondes")
+        generation_time = end_time - start_time
 
         # Décodage de la réponse générée
         generated_ids = [
@@ -269,11 +269,15 @@ def chat():
         ]
         response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
-        # Retourner la réponse directement
-        return jsonify({"response": response.strip()}), 200
+        # Retourner la réponse avec le temps de génération
+        return jsonify({
+            "response": response.strip(),
+            "generation_time": f"{generation_time:.2f} s"
+        }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
