@@ -100,7 +100,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5DC), // Beige clair
+      backgroundColor: const Color(0xFFFDF6E3), // Beige clair
       appBar: AppBar(
         title: const Text(
           'Inscription',

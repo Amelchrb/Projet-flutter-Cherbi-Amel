@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart'; // Firestore pour la gest
 import 'package:firebase_auth/firebase_auth.dart'; // Firebase Auth pour la gestion des utilisateurs
 import 'package:http/http.dart' as http; // HTTP pour appeler l'API Flask
 import 'dart:convert'; // Pour décoder les réponses JSON
+import 'package:shared_preferences/shared_preferences.dart'; // Pour la mise en cache
 import 'login_screen.dart'; // Import de la page de connexion
 
 class ChatScreen extends StatefulWidget {
@@ -11,16 +12,27 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final List<Map<String, String>> _messages = [];
+  final List<Map<String, String>> _messages = []; // Liste des messages affichés
+  final List<Map<String, dynamic>> _batchedMessages =
+      []; // Liste tampon pour le Batch Writing
   final TextEditingController _controller = TextEditingController();
   User? currentUser;
   String? currentConversationId; // Conversation active
   bool _isLoading = false; // Pour afficher un état de chargement
+  late http.Client httpClient; // Client HTTP pour Keep-Alive
 
   @override
   void initState() {
     super.initState();
+    httpClient = http.Client(); // Initialisation du client HTTP
     _checkUser();
+  }
+
+  @override
+  void dispose() {
+    _saveMessagesBatch(); // Sauvegarde les messages en lot avant de quitter
+    httpClient.close(); // Fermeture du client HTTP
+    super.dispose();
   }
 
   // Vérifier si un utilisateur est connecté
@@ -41,18 +53,33 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  // Charger les messages d'une conversation
+  void _startNewConversation() async {
+    // Sauvegarder les messages restants dans le batch
+    await _saveMessagesBatch(); // Sauvegarde les messages en lot
+
+    // Réinitialiser l'état
+    setState(() {
+      _messages.clear(); // Vide les messages affichés
+      currentConversationId = null; // Réinitialise l'ID de la conversation
+    });
+  }
+
+  // Charger les messages d'une conversation avec pagination
   Future<void> _loadConversation(String conversationId) async {
+    _saveMessagesBatch(); // Sauvegarde les messages restants avant de charger une nouvelle conversation
+
     setState(() {
       _isLoading = true;
-      _messages.clear(); // Effacer les messages actuels
+      _messages.clear();
     });
 
     try {
       final querySnapshot = await FirebaseFirestore.instance
           .collection('messages')
           .where('conversationId', isEqualTo: conversationId)
+          .where('userId', isEqualTo: currentUser?.uid)
           .orderBy('timestamp')
+          .limit(50)
           .get();
 
       setState(() {
@@ -73,11 +100,96 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // Ajouter un message à la liste tampon pour écriture en lot
+  void _queueMessage(String role, String content) {
+    if (currentConversationId == null) return;
+
+    _batchedMessages.add({
+      'conversationId': currentConversationId,
+      'userId': currentUser?.uid,
+      'role': role,
+      'content': content,
+      'timestamp': DateTime.now(),
+    });
+
+    // Log : Afficher la taille du batch après ajout
+    print(
+        'Message ajouté au batch. Taille actuelle du batch : ${_batchedMessages.length}');
+
+    // Sauvegarde automatique si le batch atteint 5 messages
+    if (_batchedMessages.length >= 6) {
+      _saveMessagesBatch();
+    }
+  }
+
+  // Sauvegarder les messages en lot dans Firestore
+  Future<void> _saveMessagesBatch() async {
+    if (_batchedMessages.isEmpty)
+      return; // Si aucun message à sauvegarder, ne rien faire
+
+    final batch = FirebaseFirestore.instance.batch();
+
+    for (var message in _batchedMessages) {
+      final docRef = FirebaseFirestore.instance.collection('messages').doc();
+      batch.set(docRef, message);
+    }
+
+    try {
+      await batch
+          .commit(); // Sauvegarder tous les messages en une seule opération
+      _batchedMessages.clear(); // Vider la liste tampon après la sauvegarde
+    } catch (e) {
+      print('Erreur lors de l\'écriture en lot : $e');
+    }
+  }
+
+  // Appeler l'API Flask pour obtenir une réponse
+  Future<String> _sendMessageToAPI(String message) async {
+    final url = Uri.parse('http://10.21.35.155:5000/chat');
+    try {
+      // Vérifier le cache avant d'envoyer la requête
+      final cachedResponse = await _getCachedResponse(message);
+      if (cachedResponse != null) {
+        return cachedResponse; // Retourner la réponse en cache
+      }
+
+      final response = await httpClient.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'message': message}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final botResponse = data['response'] ?? 'Erreur : réponse vide.';
+        await _cacheResponse(
+            message, botResponse); // Mise en cache de la réponse
+        return botResponse;
+      } else {
+        return 'Erreur API : ${response.statusCode}';
+      }
+    } catch (e) {
+      return 'Erreur de connexion à l’API : $e';
+    }
+  }
+
+  // Sauvegarder un message en cache
+  Future<void> _cacheResponse(String message, String response) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(message, response);
+  }
+
+  // Récupérer une réponse du cache
+  Future<String?> _getCachedResponse(String message) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(message);
+  }
+
   // Fonction pour envoyer un message
   Future<void> _sendMessage(String message) async {
     if (message.isEmpty) return;
 
-    // Créer une nouvelle conversation dans l'historique si aucune conversation active
+    // Créer une nouvelle conversation si aucune n'est active
     if (currentConversationId == null) {
       final excerpt = message.split(' ').take(3).join(' ');
       final newConversationRef =
@@ -99,7 +211,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
 
-    // Efface immédiatement le champ de saisie pour une meilleure expérience utilisateur
+    // Efface immédiatement le champ de saisie
     _controller.clear();
 
     // Ajouter le message utilisateur dans l'interface
@@ -108,63 +220,20 @@ class _ChatScreenState extends State<ChatScreen> {
       _isLoading = true; // Activer l'état de chargement
     });
 
-    // Appeler l'API Flask pour obtenir la réponse
+    // Ajouter le message utilisateur dans la liste tampon
+    _queueMessage('user', message);
+
+    // Appeler l'API Flask pour obtenir une réponse
     final botResponse = await _sendMessageToAPI(message);
 
-    // Ajouter la réponse de l'IA dans l'interface
+    // Ajouter la réponse du bot dans l'interface
     setState(() {
       _messages.add({'role': 'bot', 'content': botResponse});
       _isLoading = false; // Désactiver l'état de chargement
     });
 
-    // Sauvegarder les messages dans Firestore
-    try {
-      await _saveMessage('user', message);
-      await _saveMessage('bot', botResponse);
-    } catch (e) {
-      print('Erreur lors de la sauvegarde du message : $e');
-    }
-  }
-
-// Méthode pour sauvegarder un message dans Firestore
-  Future<void> _saveMessage(String role, String content) async {
-    if (currentConversationId == null)
-      return; // Vérifie qu'une conversation est active
-
-    try {
-      // Ajouter le message à la collection "messages"
-      await FirebaseFirestore.instance.collection('messages').add({
-        'conversationId': currentConversationId, // ID de la conversation active
-        'userId': currentUser?.uid, // ID de l'utilisateur connecté
-        'role': role, // Rôle ("user" ou "bot")
-        'content': content, // Contenu du message
-        'timestamp': DateTime.now(), // Date et heure du message
-      });
-    } catch (e) {
-      // En cas d'erreur, affiche un message dans la console
-      print('Erreur lors de la sauvegarde du message : $e');
-    }
-  }
-
-  // Appeler l'API Flask pour obtenir une réponse
-  Future<String> _sendMessageToAPI(String message) async {
-    final url = Uri.parse('http://10.21.35.155:5000/chat');
-    try {
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'message': message}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['response'] ?? 'Erreur : réponse vide.';
-      } else {
-        return 'Erreur API : ${response.statusCode}';
-      }
-    } catch (e) {
-      return 'Erreur de connexion à l’API : $e';
-    }
+    // Ajouter la réponse du bot dans la liste tampon
+    _queueMessage('bot', botResponse);
   }
 
   // Supprimer une conversation
@@ -213,7 +282,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5DC),
+      backgroundColor: const Color(0xFFFDF6E3),
       appBar: AppBar(
         title: const Text(
           'Chat avec Qwen',
@@ -224,10 +293,7 @@ class _ChatScreenState extends State<ChatScreen> {
           IconButton(
             icon: const Icon(Icons.add, color: Colors.white),
             onPressed: () {
-              setState(() {
-                _messages.clear();
-                currentConversationId = null;
-              });
+              _startNewConversation(); // Appel de la méthode
             },
           ),
           IconButton(
@@ -243,7 +309,8 @@ class _ChatScreenState extends State<ChatScreen> {
         child: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('history')
-              .where('userId', isEqualTo: currentUser?.uid)
+              .where('userId',
+                  isEqualTo: currentUser?.uid) // Vérifie l'utilisateur actuel
               .snapshots(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
@@ -347,7 +414,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     controller: _controller,
                     decoration: InputDecoration(
                       filled: true,
-                      fillColor: Colors.grey.shade400,
+                      fillColor: Colors.grey.shade500,
                       hintText: "Écrivez votre message...",
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
