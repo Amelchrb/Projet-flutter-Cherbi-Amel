@@ -48,7 +48,11 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connexion réussie !')),
+        SnackBar(
+          content: Text('Connexion réussie !'),
+          duration:
+              Duration(seconds: 1), // Affiche le SnackBar pendant 2 secondes
+        ),
       );
 
       // Redirection vers la page de chat
@@ -72,7 +76,11 @@ class _LoginScreenState extends State<LoginScreen> {
       await FirebaseAuth.instance.signInAnonymously();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connexion anonyme réussie !')),
+        const SnackBar(
+          content: Text('Connexion anonyme réussie !'),
+          duration:
+              Duration(seconds: 1), // Affiche le SnackBar pendant 2 secondes
+        ),
       );
 
       // Redirection vers la page de chat

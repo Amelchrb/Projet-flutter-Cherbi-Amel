@@ -71,7 +71,8 @@ class _ChatScreenState extends State<ChatScreen> {
           .collection('messages')
           .where('conversationId', isEqualTo: conversationId)
           .where('userId', isEqualTo: currentUser?.uid)
-          .orderBy('timestamp') // Trie les messages par ordre chronologique
+          .orderBy('timestamp',
+              descending: false) // Trie les messages par ordre chronologique
           .get();
 
       if (querySnapshot.docs.isNotEmpty) {
@@ -103,16 +104,16 @@ class _ChatScreenState extends State<ChatScreen> {
   void _queueMessage(String role, String content, {String? generationTime}) {
     if (currentConversationId == null) return;
 
-    // Obtenir l'heure actuelle avec précision
-    final now = DateTime.now();
+    // Ajoute une micro-différence pour les timestamps
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final adjustedTimestamp = now + _batchedMessages.length;
 
     _batchedMessages.add({
       'conversationId': currentConversationId,
       'userId': currentUser?.uid,
       'role': role,
       'content': content,
-      'timestamp':
-          now.millisecondsSinceEpoch, // Utilisation du timestamp précis
+      'timestamp': adjustedTimestamp,
       if (generationTime != null) 'generation_time': generationTime,
     });
 
@@ -209,7 +210,11 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Conversation supprimée avec succès.')),
+        SnackBar(
+          content: Text('Conversation supprimée avec succès.'),
+          duration:
+              Duration(seconds: 1), // Affiche le SnackBar pendant 2 secondes
+        ),
       );
     } catch (e) {
       print('Erreur lors de la suppression : $e');
@@ -262,25 +267,43 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     _controller.clear();
+
+    // 1. Ajouter immédiatement le message utilisateur à l'interface
     setState(() {
-      _messages.add({'role': 'user', 'content': message});
-      _isLoading = true;
+      _messages.add({
+        'role': 'user',
+        'content': message,
+        'time': DateTime.now().toIso8601String(), // Heure locale
+      });
     });
 
+    // 2. Ajouter le message à la liste tampon
+    _queueMessage('user', message);
+
     try {
-      final apiResult = await _sendMessageToAPI(message);
-      _messages.add({
-        'role': 'bot',
-        'content': apiResult['response']!,
-        'time': apiResult['time']!,
+      setState(() {
+        _isLoading = true; // Active le CircularProgressIndicator pour le bot
       });
 
-      _queueMessage('user', message);
+      // 3. Appel API pour récupérer la réponse
+      final apiResult = await _sendMessageToAPI(message);
+
+      // 4. Ajouter la réponse du bot à l'interface
+      setState(() {
+        _messages.add({
+          'role': 'bot',
+          'content': apiResult['response']!,
+          'time': apiResult['time']!,
+        });
+      });
+
+      // 5. Ajouter la réponse du bot à la liste tampon
       _queueMessage('bot', apiResult['response']!,
           generationTime: apiResult['time']);
+      await _saveMessagesBatch(); // Sauvegarde des messages dans Firestore
     } finally {
       setState(() {
-        _isLoading = false;
+        _isLoading = false; // Désactive le CircularProgressIndicator
       });
     }
   }
