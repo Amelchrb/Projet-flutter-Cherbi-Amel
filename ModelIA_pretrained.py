@@ -216,6 +216,18 @@ import time  # Pour mesurer le temps de génération
 from flask_cors import CORS  # Importer flask-cors
 
 app = Flask(__name__)
+
+# Configuration de base
+app.config['DEBUG'] = False
+app.config['TESTING'] = False  # Par défaut, le mode test est désactivé
+
+# Activer le mode test si nécessaire
+import os
+if os.getenv('FLASK_ENV') == 'testing':
+    app.config['TESTING'] = True
+    app.config['DEBUG'] = True
+    print("Mode Test Activé")
+
 CORS(app)
 
 # Charger le modèle Qwen et le tokenizer
@@ -254,8 +266,8 @@ def chat():
         # Génération de la réponse
         generated_ids = model.generate(
             **model_inputs,
-            max_new_tokens=512,
-            temperature=0.6,
+            max_new_tokens=100,
+            temperature=0.5,
             top_p=0.95
         )
 
