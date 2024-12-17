@@ -51,3 +51,20 @@ def test_chat_performance(client):
     data = response.get_json()
     assert "response" in data
     assert (end_time - start_time) <= 2.0  # Vérifie que le temps est inférieur à 2 secondes
+
+
+def test_chat_special_characters(client):
+    """Test si l'API gère des caractères spéciaux."""
+    response = client.post('/chat', json={"message": "!?@#$%^&*()😊"})
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "response" in data
+
+
+def test_chat_sql_injection(client):
+    """Test si l'API est sécurisée contre une tentative d'injection."""
+    injection_payload = "' OR '1'='1'; DROP TABLE users; --"
+    response = client.post('/chat', json={"message": injection_payload})
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "response" in data  # L'API ne doit pas planter
